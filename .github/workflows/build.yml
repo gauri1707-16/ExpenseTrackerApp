@@ -36,6 +36,10 @@ jobs:
           pip install --upgrade pip
           pip install cython==0.29.36 buildozer
 
+      - name: Clear Buildozer Cache & Specs
+        run: |
+          rm -rf .buildozer bin
+      
       - name: Build with Buildozer
         run: |
           buildozer -v android debug
