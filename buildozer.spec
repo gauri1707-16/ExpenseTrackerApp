@@ -115,10 +115,10 @@ fullscreen = 0
 #android.minapi = 21
 
 # (int) Android SDK version to use
-#android.sdk = 20
+#android.sdk = 33
 
 # (str) Android NDK version to use
-#android.ndk = 25b
+#android.ndk = 25bandroid.api = 25bandroid
 
 # (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
 #android.ndk_api = 21
@@ -495,3 +495,6 @@ warn_on_root = 1
 #        buildozer --profile demo android debug
 #
 #   Environment variable overrides have priority over profile overrides.
+#
+# (list) Application requirements
+requirements = python3,kivy,pillow,sqlite3
