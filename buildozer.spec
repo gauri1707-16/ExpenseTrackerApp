@@ -3,6 +3,9 @@
 # (str) Title of your application
 title = Expense Tracker App
 
+# (str) Source directory where your application resides
+source.dir = .
+
 # (str) Package name
 package.name = expensetracker
 
