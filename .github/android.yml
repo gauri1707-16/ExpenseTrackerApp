@@ -24,6 +24,11 @@ jobs:
         pip install cython==0.29.36 buildozer
 
     - name: Build with Buildozer
+      env:
+        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.2.9519653
+        ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.2.9519653
+      run: |
+        yes | buildozer -v android debug
       run: |
         yes | buildozer -v android debug
 
