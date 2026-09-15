@@ -31,15 +31,43 @@ Ensure you have Python 3.8 or higher installed on your system along with the pip
 ```bash
 git clone [https://github.com/your-username/personal-expense-tracker.git](https://github.com/your-username/personal-expense-tracker.git)
 cd personal-expense-tracker
-Step 2: Install Dependencies
+```
+
+### Step 2: Install Dependencies
 Run the following command in your terminal to install the required libraries:
 
-Bash
+```bash
 pip install kivy kivymd matplotlib
+```
+
 Step 3: Run the Application
 Execute the main script to launch the desktop application:
 
+```bash
 Bash
+```
+
+## Build and Install on Android
+
+Buildozer runs on Linux. On Windows, use WSL2 with Ubuntu, then run:
+
+```bash
+sudo apt update
+sudo apt install -y git zip unzip openjdk-17-jdk python3-pip python3-venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip buildozer cython
+buildozer android debug
+```
+
+The first build downloads the Android SDK and NDK and can take several minutes. The APK is created in the `bin` folder. Install it on a connected phone with:
+
+```bash
+adb install -r bin/*.apk
+```
+
+The app stores its database and generated chart in Android's writable app-data directory, so data can be saved between launches.
+
 python main.py
 Usage Instructions
 Dashboard Overview: View your current monthly totals and active budget constraints upon launching.

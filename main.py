@@ -97,7 +97,9 @@ class ExpenseTracker(MDApp):
 
     # ---------------- DATABASE ----------------
     def create_database(self):
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expenses.db")
+        # Android keeps the packaged application directory read-only. Store the
+        # writable database in the app-specific data directory instead.
+        db_path = os.path.join(self.user_data_dir, "expenses.db")
         self.connection = sqlite3.connect(db_path)
         self.cursor = self.connection.cursor()
 
@@ -391,7 +393,7 @@ class ExpenseTracker(MDApp):
 
             plt.tight_layout()
             
-            chart_path = "temp_chart.png"
+            chart_path = os.path.join(self.user_data_dir, "temp_chart.png")
             plt.savefig(chart_path, transparent=True)
             plt.close()
 
