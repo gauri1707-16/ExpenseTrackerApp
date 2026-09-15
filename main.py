@@ -17,7 +17,7 @@ from kivy.uix.image import Image
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
+ 
 # Soft light background
 Window.clearcolor = (0.97, 0.97, 0.98, 1)
 
