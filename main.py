@@ -10,6 +10,12 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.card import MDCard
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.textfield import MDTextField, MDTextFieldHintText
+from kivymd.uix.dialog import (
+    MDDialog,
+    MDDialogHeadlineText,
+    MDDialogSupportingText,
+    MDDialogButtonContainer,
+)
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.image import Image
@@ -17,7 +23,7 @@ from kivy.uix.image import Image
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
- 
+
 # Soft light background
 Window.clearcolor = (0.97, 0.97, 0.98, 1)
 
@@ -95,10 +101,8 @@ class ExpenseTracker(MDApp):
         scroll.add_widget(container)
         return scroll, container
 
-    # ---------------- DATABASE ----------------
+    # ---------------- DATABASE SETUP ----------------
     def create_database(self):
-        # Android keeps the packaged application directory read-only. Store the
-        # writable database in the app-specific data directory instead.
         db_path = os.path.join(self.user_data_dir, "expenses.db")
         self.connection = sqlite3.connect(db_path)
         self.cursor = self.connection.cursor()
@@ -130,10 +134,27 @@ class ExpenseTracker(MDApp):
         self.cursor.execute("UPDATE settings SET value = ? WHERE key='monthly_budget'", (amount,))
         self.connection.commit()
 
-    def get_total_expense(self):
-        self.cursor.execute("SELECT SUM(amount) FROM expenses")
+    def get_monthly_total_expense(self):
+        """Calculates total expenses strictly for the current calendar month (YYYY-MM)."""
+        current_year_month = date.today().strftime("%Y-%m")
+        self.cursor.execute("SELECT SUM(amount) FROM expenses WHERE strftime('%Y-%m', date) = ?", (current_year_month,))
         res = self.cursor.fetchone()[0]
         return res if res else 0.0
+
+    def show_alert_dialog(self, title, message):
+        dialog = MDDialog(
+            MDDialogHeadlineText(text=title),
+            MDDialogSupportingText(text=message),
+            MDDialogButtonContainer(
+                MDButton(
+                    MDButtonText(text="OK"),
+                    style="text",
+                    on_release=lambda x: dialog.dismiss()
+                ),
+                spacing="8dp",
+            ),
+        )
+        dialog.open()
 
     # ---------------- HOME SCREEN ----------------
     def show_home(self):
@@ -157,8 +178,7 @@ class ExpenseTracker(MDApp):
         )
         container.add_widget(subtitle)
 
-        # Overview Card
-        total_spent = self.get_total_expense()
+        total_spent = self.get_monthly_total_expense()
         percent_used = (total_spent / budget * 100) if budget > 0 else 0.0
 
         spent_card = MDCard(
@@ -172,7 +192,7 @@ class ExpenseTracker(MDApp):
             md_bg_color=(1, 1, 1, 1)
         )
         spent_title = MDLabel(
-            text="Total Spent:",
+            text="This Month's Spent:",
             font_style="Title",
             role="small",
             size_hint_y=None,
@@ -194,14 +214,17 @@ class ExpenseTracker(MDApp):
         progress = ProgressBar(max=100, value=min(percent_used, 100), size_hint_y=None, height="6dp")
         
         status_text = f"Used: {percent_used:.1f}%"
-        if percent_used >= 80:
+        if percent_used >= 100:
+            status_text += " | Budget Exceeded!"
+        elif percent_used >= 80:
             status_text += " | Near Limit"
+            
         status_label = MDLabel(
             text=status_text,
             font_style="Body",
             role="small",
             theme_text_color="Custom",
-            text_color=(0.3, 0.3, 0.3, 1),
+            text_color=(0.8, 0.2, 0.2, 1) if percent_used >= 80 else (0.3, 0.3, 0.3, 1),
             size_hint_y=None,
             height="14dp"
         )
@@ -211,7 +234,6 @@ class ExpenseTracker(MDApp):
         spent_card.add_widget(progress)
         spent_card.add_widget(status_label)
 
-        # Quick Actions
         nav_layout = MDBoxLayout(orientation="horizontal", spacing="6dp", size_hint=(1, None), height="40dp")
         
         analytics_btn = MDButton(MDButtonText(text="Analytics"), style="filled", size_hint_x=0.33)
@@ -227,7 +249,6 @@ class ExpenseTracker(MDApp):
         nav_layout.add_widget(history_btn)
         nav_layout.add_widget(budget_btn)
 
-        # Recent Items
         recent_title = MDLabel(
             text="Recent Transactions",
             font_style="Title",
@@ -352,7 +373,7 @@ class ExpenseTracker(MDApp):
                 edit_btn.bind(on_release=lambda x, id_val=eid: self.edit_expense(id_val))
 
                 delete_btn = MDButton(MDButtonText(text="Delete"), style="outlined", size_hint_x=0.5)
-                delete_btn.bind(on_release=lambda x, id_val=eid: self.delete_expense(id_val))
+                delete_btn.bind(on_release=lambda x, id_val=eid: self.confirm_delete_expense(id_val))
 
                 btn_box.add_widget(edit_btn)
                 btn_box.add_widget(delete_btn)
@@ -445,11 +466,16 @@ class ExpenseTracker(MDApp):
 
     def save_new_budget(self):
         val = self.budget_input.text.strip()
-        if val:
-            self.set_budget(float(val))
+        try:
+            budget_val = float(val)
+            if budget_val < 0:
+                raise ValueError
+            self.set_budget(budget_val)
             self.show_home()
+        except ValueError:
+            self.show_alert_dialog("Invalid Budget", "Please enter a valid positive numeric budget limit.")
 
-    # ---------------- ADD EXPENSE (NO WARNINGS) ----------------
+    # ---------------- ADD EXPENSE ----------------
     def show_add_expense(self):
         self.current_screen_name = "add_expense"
         self.screen.clear_widgets()
@@ -481,7 +507,6 @@ class ExpenseTracker(MDApp):
             } for cat in categories
         ]
         
-        # Removed width_mult to fix KivyMD warning
         self.cat_menu = MDDropdownMenu(
             caller=self.cat_in,
             items=menu_items,
@@ -521,18 +546,29 @@ class ExpenseTracker(MDApp):
         self.cat_menu.dismiss()
 
     def save_expense(self):
-        amt = self.amt_in.text.strip()
+        amt_str = self.amt_in.text.strip()
         cat = self.cat_in.text.strip()
         desc = self.desc_in.text.strip()
 
-        if amt and cat and cat != "Select Category":
-            today = date.today().strftime("%Y-%m-%d")
-            self.cursor.execute("INSERT INTO expenses (amount, category, date, description) VALUES (?, ?, ?, ?)",
-                                (float(amt), cat, today, desc))
-            self.connection.commit()
-            self.show_home()
+        if not amt_str or not cat or cat == "Select Category":
+            self.show_alert_dialog("Missing Information", "Please enter a valid amount and select a category.")
+            return
 
-    # ---------------- EDIT EXPENSE (NO WARNINGS) ----------------
+        try:
+            amt = float(amt_str)
+            if amt <= 0:
+                raise ValueError
+        except ValueError:
+            self.show_alert_dialog("Invalid Amount", "Please enter a valid numeric amount greater than zero.")
+            return
+
+        today = date.today().strftime("%Y-%m-%d")
+        self.cursor.execute("INSERT INTO expenses (amount, category, date, description) VALUES (?, ?, ?, ?)",
+                            (amt, cat, today, desc))
+        self.connection.commit()
+        self.show_home()
+
+    # ---------------- EDIT EXPENSE ----------------
     def edit_expense(self, expense_id):
         self.current_screen_name = "edit_expense"
         self.cursor.execute("SELECT amount, category, description FROM expenses WHERE id = ?", (expense_id,))
@@ -609,15 +645,43 @@ class ExpenseTracker(MDApp):
         self.edit_cat_in.text = text_item
         self.edit_cat_menu.dismiss()
 
-    def update_expense(self, expense_id, amount, category, description):
-        if amount:
-            self.cursor.execute("""
-                UPDATE expenses
-                SET amount = ?, category = ?, description = ?
-                WHERE id = ?
-            """, (float(amount), category, description, expense_id))
-            self.connection.commit()
-            self.show_history()
+    def update_expense(self, expense_id, amount_str, category, description):
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            self.show_alert_dialog("Invalid Amount", "Please enter a valid numeric amount greater than zero.")
+            return
+
+        self.cursor.execute("""
+            UPDATE expenses
+            SET amount = ?, category = ?, description = ?
+            WHERE id = ?
+        """, (amount, category, description, expense_id))
+        self.connection.commit()
+        self.show_history()
+
+    # ---------------- DELETE CONFIRMATION ----------------
+    def confirm_delete_expense(self, expense_id):
+        dialog = MDDialog(
+            MDDialogHeadlineText(text="Delete Expense"),
+            MDDialogSupportingText(text="Are you sure you want to permanently delete this transaction?"),
+            MDDialogButtonContainer(
+                MDButton(
+                    MDButtonText(text="Cancel"),
+                    style="text",
+                    on_release=lambda x: dialog.dismiss()
+                ),
+                MDButton(
+                    MDButtonText(text="Delete"),
+                    style="filled",
+                    on_release=lambda x: (dialog.dismiss(), self.delete_expense(expense_id))
+                ),
+                spacing="8dp",
+            ),
+        )
+        dialog.open()
 
     def delete_expense(self, expense_id):
         self.cursor.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
