@@ -1,0 +1,18 @@
+ID,Amount,Category,Date,Description
+2,5000.0,Food,2026-08-10,Groceries
+3,2000.0,Shopping,2026-08-10,clothes and other Accessories
+4,1500.0,Bills,2026-08-10,"Lyt bill,"
+5,200.0,Health,2026-08-10,medines
+6,800.0,Entertainment,2026-08-10,Movie
+7,7500.0,Other,2026-08-10,Rent
+8,2500.0,Travel,2026-08-10,
+9,850.0,Other,2026-08-10,Lpg
+11,525.0,Bills,2026-08-10,Mobile Bill
+12,3000.0,Food,2026-08-10,Resturants
+13,1500.0,Education,2026-08-12,Tution Fees
+14,200.0,Health,2026-08-12,Medicine
+16,300.0,Bills,2026-08-20,Wifi
+18,7500.0,Bills,2026-09-23,Rent
+19,3000.0,Food,2026-09-03,Groceries
+20,2000.0,Shopping,2026-09-04,Shopping
+21,2000.0,Travel,2026-09-06,Train pass And Fares

@@ -14,15 +14,10 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Color, RoundedRectangle
 
 # --- DATABASE SETUP ---
+import os
 def get_db_path():
-    try:
-        from kivy.app import App
-        app = App.get_running_app()
-        if app and app.user_data_dir:
-            return os.path.join(app.user_data_dir, "expenses.db")
-    except Exception:
-        pass
-    return "expenses.db"
+  db_name = 'expenses.db'
+  return db_name    
 
 def init_db():
     conn = sqlite3.connect(get_db_path())
@@ -669,33 +664,87 @@ class ExpenseTrackerRoot(BoxLayout):
         back_btn.bind(on_press=lambda x: self.refresh_dashboard())
         self.main_container.add_widget(back_btn)
 
-    def load_analytics_data(self, selected_month):
-        self.analytics_results_box.clear_widgets()
+    def load_analytics_data(self, month_str):
+      self.analytics_results_box.clear_widgets()
+      conn = sqlite3.connect(get_db_path())
+      cursor = conn.cursor()
 
-        conn = sqlite3.connect(get_db_path())
-        cursor = conn.cursor()
-        cursor.execute("SELECT category, SUM(amount) as total FROM expenses WHERE date LIKE ? GROUP BY category ORDER BY total DESC", (f"{selected_month}%",))
-        rows = cursor.fetchall()
+      # Flexible search using strftime or LIKE to match YYYY-MM
+      cursor.execute(
+          'SELECT SUM(amount) FROM expenses WHERE date LIKE ? OR substr(date,'
+          ' 1, 7) = ?',
+          (f'%{month_str}%', month_str),
+      )
+      exp_res = cursor.fetchone()[0]
+      total_exp = exp_res if exp_res else 0.0
 
-        cursor.execute("SELECT SUM(amount) FROM expenses WHERE date LIKE ?", (f"{selected_month}%",))
-        tot_exp = cursor.fetchone()[0] or 0.0
+      cursor.execute(
+          'SELECT SUM(amount) FROM income WHERE date LIKE ? OR substr(date, 1,'
+          ' 7) = ?',
+          (f'%{month_str}%', month_str),
+      )
+      inc_res = cursor.fetchone()[0]
+      total_inc = inc_res if inc_res else 0.0
 
-        cursor.execute("SELECT SUM(amount) FROM income WHERE date LIKE ?", (f"{selected_month}%",))
-        tot_inc = cursor.fetchone()[0] or 0.0
-        conn.close()
+      cursor.execute(
+          'SELECT category, SUM(amount) as total FROM expenses WHERE date LIKE ?'
+          ' OR substr(date, 1, 7) = ? GROUP BY category ORDER BY total DESC',
+          (f'%{month_str}%', month_str),
+      )
+      cat_rows = cursor.fetchall()
+      conn.close()
 
-        summary_card = RoundedBox(bg_color=(1, 1, 1, 1), radius=8, size_hint_y=None, height=50, padding=8)
-        summary_card.add_widget(Label(text=f"[b]Month: {selected_month}[/b]\nIncome: ₹{tot_inc:,.2f} | Expense: ₹{tot_exp:,.2f}", markup=True, color=(0.15, 0.25, 0.22, 1), font_size=12))
-        self.analytics_results_box.add_widget(summary_card)
+      self.analytics_results_box.add_widget(
+          Label(
+              text=(
+                  f'[b]Summary for {month_str}[/b]\nIncome: ₹{total_inc:,.2f} |'
+                  f' Expense: ₹{total_exp:,.2f}'
+              ),
+              markup=True,
+              color=(0.15, 0.25, 0.22, 1),
+              font_size=13,
+              size_hint_y=None,
+              height=45,
+          )
+      )
+      self.analytics_results_box.add_widget(
+          Label(
+              text='[b]Category Breakdown:[/b]',
+              markup=True,
+              color=(0.12, 0.20, 0.18, 1),
+              font_size=12,
+              size_hint_y=None,
+              height=25,
+          )
+      )
 
-        if not rows:
-            self.analytics_results_box.add_widget(Label(text=f"No expenses found for {selected_month}.", color=(0.4, 0.4, 0.4, 1), size_hint_y=None, height=40))
-        else:
-            self.analytics_results_box.add_widget(Label(text=f"[b]Category Breakdown ({selected_month}):[/b]", markup=True, color=(0.15, 0.25, 0.22, 1), font_size=13, size_hint_y=None, height=24))
-            for cat, total in rows:
-                card = RoundedBox(bg_color=(1, 1, 1, 1), radius=8, size_hint_y=None, height=40, padding=10)
-                card.add_widget(Label(text=f"[b]{cat}[/b]: [color=#d93838]₹{total:,.2f}[/color]", markup=True, color=(0.2, 0.2, 0.2, 1), font_size=13))
-                self.analytics_results_box.add_widget(card)
+      if not cat_rows:
+        self.analytics_results_box.add_widget(
+            Label(
+                text=f'No expenses found for {month_str}.',
+                color=(0.4, 0.4, 0.4, 1),
+                size_hint_y=None,
+                height=30,
+            )
+        )
+      else:
+        for c, t in cat_rows:
+          card = RoundedBox(
+              bg_color=(1, 1, 1, 1),
+              radius=6,
+              size_hint_y=None,
+              height=36,
+              padding=6,
+          )
+          card.add_widget(
+              Label(
+                  text=f'{c}: [color=#EF4444]₹{t:,.2f}[/color]',
+                  markup=True,
+                  color=(0.2, 0.2, 0.2, 1),
+                  font_size=11,
+              )
+          )
+          self.analytics_results_box.add_widget(card)
 
     # --- SET BUDGET SCREEN ---
     def show_budget_screen(self):
