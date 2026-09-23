@@ -112,27 +112,32 @@ class ExpenseTrackerRoot(BoxLayout):
 
     # --- CUSTOM POPUP SYSTEM ---
     def show_popup(self, title, message):
-        content = BoxLayout(orientation='vertical', padding=15, spacing=12)
-        content.add_widget(Label(text=message, color=(0.2, 0.2, 0.2, 1), halign='center', font_size=13))
-        
-        close_btn = Button(
-            text="OK", 
-            size_hint_y=None, 
-            height=42, 
-            background_normal='', 
-            background_color=(0.12, 0.45, 0.42, 1), 
-            bold=True
-        )
-        
-        popup = Popup(
-            title=title, 
-            content=content, 
-            size_hint=(0.85, 0.3),
-            auto_dismiss=True
-        )
-        close_btn.bind(on_press=popup.dismiss)
-        content.add_widget(close_btn)
-        popup.open()
+      content = BoxLayout(orientation='vertical', padding=15, spacing=12)
+      content.add_widget(
+          Label(
+              text=message,
+              color=(1, 1, 1, 1),  # Pure Bright White text for clear visibility
+              halign='center',
+              font_size=14,
+          )
+      )
+
+      close_btn = Button(
+          text='OK',
+          size_hint_y=None,
+          height=42,
+          background_normal='',
+          background_color=(0.12, 0.45, 0.42, 1),
+          color=(1, 1, 1, 1),
+          bold=True,
+      )
+
+      popup = Popup(
+          title=title, content=content, size_hint=(0.85, 0.3), auto_dismiss=True
+      )
+      close_btn.bind(on_press=popup.dismiss)
+      content.add_widget(close_btn)
+      popup.open()
 
     # --- 1. CORE DASHBOARD ---
     def refresh_dashboard(self):
@@ -765,7 +770,6 @@ class ExpenseTrackerRoot(BoxLayout):
             self.show_popup("Export Successful", f"Backup saved successfully at:\n{file_path}")
         except Exception as e:
             self.show_popup("Export Failed", f"Error exporting data: {str(e)}")
-
 
 # --- APP RUNNER ---
 class ExpenseTrackerApp(App):
