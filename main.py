@@ -1,692 +1,777 @@
 import os
 import sqlite3
-from datetime import date
-from kivy.core.window import Window
-from kivymd.app import MDApp
-from kivymd.uix.screen import MDScreen
-from kivymd.uix.label import MDLabel
-from kivymd.uix.button import MDButton, MDButtonText, MDIconButton
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.card import MDCard
-from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.textfield import MDTextField, MDTextFieldHintText
-from kivymd.uix.dialog import (
-    MDDialog,
-    MDDialogHeadlineText,
-    MDDialogSupportingText,
-    MDDialogButtonContainer,
-)
-from kivy.uix.progressbar import ProgressBar
+import csv
+from datetime import datetime, timedelta
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.spinner import Spinner
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.image import Image
+from kivy.uix.popup import Popup
+from kivy.graphics import Color, RoundedRectangle
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+# --- DATABASE SETUP ---
+def get_db_path():
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        if app and app.user_data_dir:
+            return os.path.join(app.user_data_dir, "expenses.db")
+    except Exception:
+        pass
+    return "expenses.db"
 
-# Soft light background
-Window.clearcolor = (0.97, 0.97, 0.98, 1)
-
-class ExpenseTracker(MDApp):
-
-    def build(self):
-        self.theme_cls.theme_style = "Light"
-        self.theme_cls.primary_palette = "Purple"
-        
-        if os.path.exists("app_icon.png"):
-            self.icon = "app_icon.png"
-
-        self.create_database()
-        
-        Window.bind(on_keyboard=self.on_back_button)
-
-        self.current_screen_name = "home"
-        self.screen = MDScreen(md_bg_color=(0.97, 0.97, 0.98, 1))
-        self.show_home()
-        return self.screen
-
-    def on_back_button(self, window, key, *args):
-        if key == 27:
-            if self.current_screen_name != "home":
-                self.show_home()
-                return True
-        return False
-
-    def create_top_bar(self, title_text, show_back=True):
-        top_bar = MDBoxLayout(
-            orientation="horizontal",
-            size_hint=(1, None),
-            height="48dp",
-            padding=["4dp", "2dp", "4dp", "2dp"],
-            spacing="4dp",
-            md_bg_color=(0.92, 0.92, 0.94, 1)
+def init_db():
+    conn = sqlite3.connect(get_db_path())
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount REAL,
+            category TEXT,
+            date TEXT,
+            description TEXT
         )
-        if show_back:
-            back_btn = MDIconButton(
-                icon="arrow-left",
-                pos_hint={"center_y": 0.5}
-            )
-            back_btn.bind(on_release=lambda x: self.show_home())
-            top_bar.add_widget(back_btn)
-        else:
-            spacer = MDBoxLayout(size_hint_x=None, width="40dp")
-            top_bar.add_widget(spacer)
-
-        title_lbl = MDLabel(
-            text=title_text,
-            bold=True,
-            halign="center",
-            font_style="Title",
-            role="medium",
-            theme_text_color="Custom",
-            text_color=(0.1, 0.1, 0.1, 1)
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS income (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount REAL,
+            date TEXT,
+            description TEXT
         )
-        top_bar.add_widget(title_lbl)
-        
-        right_spacer = MDBoxLayout(size_hint_x=None, width="40dp")
-        top_bar.add_widget(right_spacer)
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value REAL
+        )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_budget', 25000.0)")
+    conn.commit()
+    conn.close()
 
-        return top_bar
+# --- STYLISH ROUNDED CONTAINER ---
+class RoundedBox(BoxLayout):
+    def __init__(self, bg_color=(1, 1, 1, 1), radius=12, **kwargs):
+        super(RoundedBox, self).__init__(**kwargs)
+        self.bg_color = bg_color
+        self.radius = radius
+        with self.canvas.before:
+            Color(*self.bg_color)
+            self.rect = RoundedRectangle(size=self.size, pos=self.pos, radius=[self.radius])
+        self.bind(size=self._update_rect, pos=self._update_rect)
 
-    def create_mobile_card(self):
+    def _update_rect(self, instance, value):
+        self.rect.pos = instance.pos
+        self.rect.size = instance.size
+
+# --- MAIN APPLICATION ROOT ---
+class ExpenseTrackerRoot(BoxLayout):
+    def __init__(self, **kwargs):
+        super(ExpenseTrackerRoot, self).__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.padding = 15
+        self.spacing = 12
+
+        # App Background: Soft Teal Shade
+        with self.canvas.before:
+            Color(0.86, 0.94, 0.92, 1)
+            self.rect = RoundedRectangle(size=self.size, pos=self.pos, radius=[0])
+        self.bind(size=self._update_rect, pos=self._update_rect)
+
+        # Header Title
+        title_layout = BoxLayout(size_hint_y=None, height=40)
+        title_layout.add_widget(Label(
+            text="[b]Expense & Budget Manager[/b]", 
+            markup=True, 
+            font_size=18, 
+            color=(0.10, 0.22, 0.20, 1),
+            halign='center'
+        ))
+        self.add_widget(title_layout)
+
+        # Scrollable Content Area
         scroll = ScrollView(size_hint=(1, 1))
-        container = MDBoxLayout(
-            orientation="vertical",
-            padding=["16dp", "12dp", "16dp", "16dp"],
-            spacing="14dp",
-            size_hint_y=None,
-            md_bg_color=(0.97, 0.97, 0.98, 1)
+        self.main_container = BoxLayout(orientation='vertical', size_hint_y=None, spacing=14, padding=5)
+        self.main_container.bind(minimum_height=self.main_container.setter('height'))
+        scroll.add_widget(self.main_container)
+        self.add_widget(scroll)
+
+        self.refresh_dashboard()
+
+    def _update_rect(self, instance, value):
+        self.rect.pos = instance.pos
+        self.rect.size = instance.size
+
+    def clear_view(self):
+        self.main_container.clear_widgets()
+
+    # --- CUSTOM POPUP SYSTEM ---
+    def show_popup(self, title, message):
+        content = BoxLayout(orientation='vertical', padding=15, spacing=12)
+        content.add_widget(Label(text=message, color=(0.2, 0.2, 0.2, 1), halign='center', font_size=13))
+        
+        close_btn = Button(
+            text="OK", 
+            size_hint_y=None, 
+            height=42, 
+            background_normal='', 
+            background_color=(0.12, 0.45, 0.42, 1), 
+            bold=True
         )
-        container.bind(minimum_height=container.setter('height'))
-        scroll.add_widget(container)
-        return scroll, container
-
-    # ---------------- DATABASE SETUP ----------------
-    def create_database(self):
-        db_path = os.path.join(self.user_data_dir, "expenses.db")
-        self.connection = sqlite3.connect(db_path)
-        self.cursor = self.connection.cursor()
-
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS expenses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                amount REAL NOT NULL,
-                category TEXT NOT NULL,
-                date TEXT NOT NULL,
-                description TEXT
-            )
-        """)
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value REAL
-            )
-        """)
-        self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_budget', 30000.0)")
-        self.connection.commit()
-
-    def get_budget(self):
-        self.cursor.execute("SELECT value FROM settings WHERE key='monthly_budget'")
-        res = self.cursor.fetchone()
-        return res[0] if res else 30000.0
-
-    def set_budget(self, amount):
-        self.cursor.execute("UPDATE settings SET value = ? WHERE key='monthly_budget'", (amount,))
-        self.connection.commit()
-
-    def get_monthly_total_expense(self):
-        """Calculates total expenses strictly for the current calendar month (YYYY-MM)."""
-        current_year_month = date.today().strftime("%Y-%m")
-        self.cursor.execute("SELECT SUM(amount) FROM expenses WHERE strftime('%Y-%m', date) = ?", (current_year_month,))
-        res = self.cursor.fetchone()[0]
-        return res if res else 0.0
-
-    def show_alert_dialog(self, title, message):
-        dialog = MDDialog(
-            MDDialogHeadlineText(text=title),
-            MDDialogSupportingText(text=message),
-            MDDialogButtonContainer(
-                MDButton(
-                    MDButtonText(text="OK"),
-                    style="text",
-                    on_release=lambda x: dialog.dismiss()
-                ),
-                spacing="8dp",
-            ),
+        
+        popup = Popup(
+            title=title, 
+            content=content, 
+            size_hint=(0.85, 0.3),
+            auto_dismiss=True
         )
-        dialog.open()
+        close_btn.bind(on_press=popup.dismiss)
+        content.add_widget(close_btn)
+        popup.open()
 
-    # ---------------- HOME SCREEN ----------------
-    def show_home(self):
-        self.current_screen_name = "home"
-        self.screen.clear_widgets()
+    # --- 1. CORE DASHBOARD ---
+    def refresh_dashboard(self):
+        self.clear_view()
 
-        main_layout = MDBoxLayout(orientation="vertical", md_bg_color=(0.97, 0.97, 0.98, 1))
-        top_bar = self.create_top_bar("Expense Tracker", show_back=False)
-        scroll, container = self.create_mobile_card()
+        conn = sqlite3.connect(get_db_path())
+        cursor = conn.cursor()
+        
+        now = datetime.now()
+        current_month_str = now.strftime("%Y-%m")
+        current_month_name = now.strftime("%B")
+        
+        first_day_current = now.replace(day=1)
+        last_day_prev = first_day_current - timedelta(days=1)
+        prev_month_str = last_day_prev.strftime("%Y-%m")
+        prev_month_name = last_day_prev.strftime("%B")
 
-        budget = self.get_budget()
-        subtitle = MDLabel(
-            text=f"Monthly Budget: ₹{budget:,.2f}",
-            halign="center",
-            font_style="Body",
-            role="medium",
-            theme_text_color="Custom",
-            text_color=(0.2, 0.2, 0.2, 1),
-            size_hint_y=None,
-            height="20dp"
-        )
-        container.add_widget(subtitle)
+        cursor.execute("SELECT SUM(amount) FROM income WHERE date LIKE ?", (f"{current_month_str}%",))
+        inc_res = cursor.fetchone()[0]
+        total_income = inc_res if inc_res else 0.0
 
-        total_spent = self.get_monthly_total_expense()
-        percent_used = (total_spent / budget * 100) if budget > 0 else 0.0
+        cursor.execute("SELECT SUM(amount) FROM expenses WHERE date LIKE ?", (f"{current_month_str}%",))
+        exp_res = cursor.fetchone()[0]
+        total_expense = exp_res if exp_res else 0.0
 
-        spent_card = MDCard(
-            orientation="vertical",
-            padding="12dp",
-            spacing="6dp",
-            style="elevated",
-            size_hint=(1, None),
-            height="105dp",
-            radius=[12, 12, 12, 12],
-            md_bg_color=(1, 1, 1, 1)
-        )
-        spent_title = MDLabel(
-            text="This Month's Spent:",
-            font_style="Title",
-            role="small",
-            size_hint_y=None,
-            height="16dp",
-            theme_text_color="Custom",
-            text_color=(0.1, 0.1, 0.1, 1)
-        )
-        spent_amount = MDLabel(
-            text=f"₹{total_spent:,.2f}",
+        cursor.execute("SELECT SUM(amount) FROM expenses WHERE date LIKE ?", (f"{prev_month_str}%",))
+        prev_exp_res = cursor.fetchone()[0]
+        prev_expense = prev_exp_res if prev_exp_res else 0.0
+
+        cursor.execute("SELECT value FROM settings WHERE key='monthly_budget'")
+        b_res = cursor.fetchone()
+        monthly_budget = b_res[0] if b_res else 25000.0
+
+        cursor.execute("SELECT category, SUM(amount) as total FROM expenses WHERE date LIKE ? GROUP BY category ORDER BY total DESC LIMIT 1", (f"{current_month_str}%",))
+        top_cat_res = cursor.fetchone()
+        conn.close()
+
+        remaining_balance = total_income - total_expense
+        budget_used_pct = (total_expense / monthly_budget * 100) if monthly_budget > 0 else 0.0
+        if budget_used_pct > 100:
+            budget_used_pct = 100.0
+
+        filled_blocks = int(budget_used_pct / 6)
+        empty_blocks = 16 - filled_blocks
+        progress_bar_str = "[" + "=" * filled_blocks + "-" * empty_blocks + "]"
+
+        diff = total_expense - prev_expense
+        if diff > 0:
+            comp_text = f"Change: ₹{diff:,.2f} more than {prev_month_name}"
+            comp_color = (0.80, 0.25, 0.25, 1)
+        elif diff < 0:
+            comp_text = f"Change: ₹{abs(diff):,.2f} less than {prev_month_name}"
+            comp_color = (0.08, 0.50, 0.25, 1)
+        else:
+            comp_text = f"Change: Same as {prev_month_name}"
+            comp_color = (0.30, 0.38, 0.36, 1)
+
+        dash_card = RoundedBox(bg_color=(1, 1, 1, 1), radius=16, orientation='vertical', size_hint_y=None, height=330, padding=14, spacing=6)
+        
+        dash_card.add_widget(Label(text=f"[b]Dashboard Summary ({current_month_name})[/b]", markup=True, font_size=15, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=22))
+        
+        stats_layout_1 = GridLayout(cols=2, size_hint_y=None, height=38)
+        stats_layout_1.add_widget(Label(text=f"Income\n[b]₹{total_income:,.2f}[/b]", markup=True, color=(0.08, 0.50, 0.25, 1), font_size=13, halign='center'))
+        stats_layout_1.add_widget(Label(text=f"Expense\n[b]₹{total_expense:,.2f}[/b]", markup=True, color=(0.80, 0.20, 0.20, 1), font_size=13, halign='center'))
+        dash_card.add_widget(stats_layout_1)
+
+        stats_layout_2 = GridLayout(cols=2, size_hint_y=None, height=38)
+        stats_layout_2.add_widget(Label(text=f"Balance\n[b]₹{remaining_balance:,.2f}[/b]", markup=True, color=(0.1, 0.35, 0.70, 1), font_size=13, halign='center'))
+        stats_layout_2.add_widget(Label(text=f"Budget\n[b]₹{monthly_budget:,.2f}[/b]", markup=True, color=(0.75, 0.42, 0.1, 1), font_size=13, halign='center'))
+        dash_card.add_widget(stats_layout_2)
+
+        dash_card.add_widget(Label(text=f"Budget Used: {budget_used_pct:.0f}%", color=(0.3, 0.3, 0.3, 1), font_size=12, size_hint_y=None, height=18))
+        dash_card.add_widget(Label(text=progress_bar_str, color=(0.12, 0.45, 0.42, 1), font_size=14, bold=True, size_hint_y=None, height=20))
+
+        if total_expense > monthly_budget:
+            status_text = "Status: Budget Exceeded!"
+            status_color = (0.85, 0.15, 0.15, 1)
+        elif budget_used_pct >= 85:
+            status_text = "Warning: Budget nearly full"
+            status_color = (0.80, 0.40, 0.1, 1)
+        else:
+            status_text = "Budget Normal & Safe"
+            status_color = (0.08, 0.50, 0.25, 1)
+
+        dash_card.add_widget(Label(text=status_text, color=status_color, bold=True, font_size=12, size_hint_y=None, height=20))
+        dash_card.add_widget(Label(text=comp_text, color=comp_color, font_size=11, size_hint_y=None, height=18))
+
+        if top_cat_res:
+            insight_text = f"Insight: {top_cat_res[0]} is your highest category (₹{top_cat_res[1]:,.2f})"
+        else:
+            insight_text = "Insight: Add expenses to view category insights."
+        dash_card.add_widget(Label(text=insight_text, color=(0.25, 0.35, 0.55, 1), font_size=11, size_hint_y=None, height=20))
+
+        self.main_container.add_widget(dash_card)
+
+        btn_grid = GridLayout(cols=2, size_hint_y=None, height=175, spacing=8)
+        
+        add_exp_btn = Button(text="+ Add Expense", background_normal='', background_color=(0.12, 0.45, 0.42, 1), bold=True, font_size=13)
+        add_exp_btn.bind(on_press=lambda x: self.show_add_expense_screen())
+        btn_grid.add_widget(add_exp_btn)
+
+        add_inc_btn = Button(text="+ Add Income", background_normal='', background_color=(0.10, 0.55, 0.32, 1), bold=True, font_size=13)
+        add_inc_btn.bind(on_press=lambda x: self.show_add_income_screen())
+        btn_grid.add_widget(add_inc_btn)
+
+        history_btn = Button(text="History & Filter", background_normal='', background_color=(0.35, 0.25, 0.65, 1), bold=True, font_size=13)
+        history_btn.bind(on_press=lambda x: self.show_history_screen())
+        btn_grid.add_widget(history_btn)
+
+        analytics_btn = Button(text="Analytics (Past Months)", background_normal='', background_color=(0.20, 0.45, 0.65, 1), bold=True, font_size=12)
+        analytics_btn.bind(on_press=lambda x: self.show_analytics_screen())
+        btn_grid.add_widget(analytics_btn)
+
+        budget_btn = Button(text="Set Budget", background_normal='', background_color=(0.75, 0.42, 0.1, 1), bold=True, font_size=13)
+        budget_btn.bind(on_press=lambda x: self.show_budget_screen())
+        btn_grid.add_widget(budget_btn)
+
+        view_db_btn = Button(text="View Database (.db)", background_normal='', background_color=(0.5, 0.2, 0.6, 1), bold=True, font_size=13)
+        view_db_btn.bind(on_press=lambda x: self.show_raw_database_screen())
+        btn_grid.add_widget(view_db_btn)
+
+        settings_btn = Button(text="Settings", background_normal='', background_color=(0.4, 0.4, 0.4, 1), bold=True, font_size=13)
+        settings_btn.bind(on_press=lambda x: self.show_settings_screen())
+        btn_grid.add_widget(settings_btn)
+
+        btn_grid.add_widget(Label(text=""))
+        self.main_container.add_widget(btn_grid)
+
+        self.main_container.add_widget(Label(text="[b]Recent Transactions[/b]", markup=True, font_size=15, color=(0.15, 0.25, 0.22, 1), size_hint_y=None, height=28))
+        
+        conn = sqlite3.connect(get_db_path())
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, amount, category, date, description FROM expenses ORDER BY id DESC LIMIT 4")
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            self.main_container.add_widget(Label(text="No transactions recorded yet.", color=(0.4, 0.4, 0.4, 1), size_hint_y=None, height=30))
+        else:
+            for row in rows:
+                eid, amt, cat, dt, desc = row
+                item_card = RoundedBox(bg_color=(1, 1, 1, 1), radius=8, size_hint_y=None, height=38, padding=8)
+                item_card.add_widget(Label(text=f"[b]{dt}[/b] | {cat} | [color=#d93838]₹{amt:,.2f}[/color] | {desc}", markup=True, color=(0.2, 0.2, 0.2, 1), font_size=12))
+                self.main_container.add_widget(item_card)
+
+    # --- RAW DATABASE VIEWER SCREEN ---
+    def show_raw_database_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]SQLite Database Viewer (expenses.db)[/b]", markup=True, font_size=16, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
+
+        db_scroll_box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=8)
+        db_scroll_box.bind(minimum_height=db_scroll_box.setter('height'))
+
+        scroll_db = ScrollView(size_hint=(1, None), height=350)
+        scroll_db.add_widget(db_scroll_box)
+        self.main_container.add_widget(scroll_db)
+
+        try:
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+
+            db_scroll_box.add_widget(Label(text="[b]-- Table: expenses --[/b]", markup=True, color=(0.15, 0.45, 0.4, 1), size_hint_y=None, height=25))
+            cursor.execute("SELECT id, amount, category, date, description FROM expenses")
+            exp_rows = cursor.fetchall()
+            
+            if not exp_rows:
+                db_scroll_box.add_widget(Label(text="Table 'expenses' is empty.", color=(0.4, 0.4, 0.4, 1), size_hint_y=None, height=30))
+            else:
+                for r in exp_rows:
+                    card = RoundedBox(bg_color=(1, 1, 1, 1), radius=6, size_hint_y=None, height=36, padding=6)
+                    card.add_widget(Label(text=f"ID:{r[0]} | ₹{r[1]} | {r[2]} | {r[3]} | {r[4]}", color=(0.2, 0.2, 0.2, 1), font_size=11))
+                    db_scroll_box.add_widget(card)
+
+            db_scroll_box.add_widget(Label(text="[b]-- Table: income --[/b]", markup=True, color=(0.1, 0.5, 0.3, 1), size_hint_y=None, height=25))
+            cursor.execute("SELECT id, amount, date, description FROM income")
+            inc_rows = cursor.fetchall()
+
+            if not inc_rows:
+                db_scroll_box.add_widget(Label(text="Table 'income' is empty.", color=(0.4, 0.4, 0.4, 1), size_hint_y=None, height=30))
+            else:
+                for r in inc_rows:
+                    card = RoundedBox(bg_color=(1, 1, 1, 1), radius=6, size_hint_y=None, height=36, padding=6)
+                    card.add_widget(Label(text=f"ID:{r[0]} | ₹{r[1]} | {r[2]} | {r[3]}", color=(0.2, 0.2, 0.2, 1), font_size=11))
+                    db_scroll_box.add_widget(card)
+
+            conn.close()
+        except Exception as e:
+            db_scroll_box.add_widget(Label(text=f"Error reading DB: {str(e)}", color=(0.8, 0.2, 0.2, 1), size_hint_y=None, height=35))
+
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
+
+    # --- ADD EXPENSE SCREEN ---
+    def show_add_expense_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]+ Add New Expense[/b]", markup=True, font_size=17, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
+
+        self.exp_amt = TextInput(hint_text="Amount (e.g. 350)", multiline=False, input_filter='float', size_hint_y=None, height=45)
+        self.exp_cat = Spinner(text='Food', values=('Food', 'Travel', 'Shopping', 'Bills', 'Entertainment', 'Health', 'Education', 'Other'), size_hint_y=None, height=45)
+        self.exp_date = TextInput(text=datetime.now().strftime("%Y-%m-%d"), hint_text="Date (YYYY-MM-DD)", multiline=False, size_hint_y=None, height=45)
+        self.exp_desc = TextInput(hint_text="Note / Description", multiline=False, size_hint_y=None, height=45)
+
+        self.main_container.add_widget(Label(text="Amount (₹):", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.exp_amt)
+        self.main_container.add_widget(Label(text="Category:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.exp_cat)
+        self.main_container.add_widget(Label(text="Select Custom Date (YYYY-MM-DD):", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.exp_date)
+        self.main_container.add_widget(Label(text="Note:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.exp_desc)
+
+        save_btn = Button(text="Save Expense", size_hint_y=None, height=48, background_normal='', background_color=(0.12, 0.55, 0.3, 1), bold=True)
+        save_btn.bind(on_press=self.save_expense_db)
+        self.main_container.add_widget(save_btn)
+
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
+
+    def save_expense_db(self, instance):
+        try:
+            amt = float(self.exp_amt.text.strip())
+            cat = self.exp_cat.text
+            dt = self.exp_date.text.strip()
+            desc = self.exp_desc.text.strip()
+            if amt <= 0: raise ValueError()
+
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO expenses (amount, category, date, description) VALUES (?, ?, ?, ?)", (amt, cat, dt, desc))
+            conn.commit()
+            conn.close()
+
+            self.show_popup("Success", "Expense added successfully!")
+            self.refresh_dashboard()
+        except ValueError:
+            self.show_popup("Invalid Input", "Please enter a valid numeric amount greater than 0.")
+
+    # --- ADD INCOME SCREEN ---
+    def show_add_income_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]+ Add Income[/b]", markup=True, font_size=17, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
+
+        self.inc_amt = TextInput(hint_text="Amount (e.g. 30000)", multiline=False, input_filter='float', size_hint_y=None, height=45)
+        self.inc_date = TextInput(text=datetime.now().strftime("%Y-%m-%d"), hint_text="Date (YYYY-MM-DD)", multiline=False, size_hint_y=None, height=45)
+        self.inc_desc = TextInput(hint_text="Description (e.g. Salary)", multiline=False, size_hint_y=None, height=45)
+
+        self.main_container.add_widget(Label(text="Amount (₹):", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.inc_amt)
+        self.main_container.add_widget(Label(text="Date:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.inc_date)
+        self.main_container.add_widget(Label(text="Description:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.inc_desc)
+
+        save_btn = Button(text="Save Income", size_hint_y=None, height=48, background_normal='', background_color=(0.1, 0.5, 0.32, 1), bold=True)
+        save_btn.bind(on_press=self.save_income_db)
+        self.main_container.add_widget(save_btn)
+
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
+
+    def save_income_db(self, instance):
+        try:
+            amt = float(self.inc_amt.text.strip())
+            dt = self.inc_date.text.strip()
+            desc = self.inc_desc.text.strip()
+            if amt <= 0: raise ValueError()
+
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO income (amount, date, description) VALUES (?, ?, ?)", (amt, dt, desc))
+            conn.commit()
+            conn.close()
+
+            self.show_popup("Success", "Income added successfully!")
+            self.refresh_dashboard()
+        except ValueError:
+            self.show_popup("Invalid Input", "Please enter a valid numeric income amount.")
+
+    # --- HISTORY & FILTER SCREEN ---
+    def show_history_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]Transaction History & Search[/b]", markup=True, font_size=17, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
+
+        search_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=45, spacing=6)
+        self.search_input = TextInput(hint_text="Search category or note...", multiline=False)
+        search_btn = Button(text="Search", size_hint_x=None, width=85, background_normal='', background_color=(0.15, 0.42, 0.65, 1), bold=True)
+        search_btn.bind(on_press=lambda x: self.load_filtered_history(self.search_input.text.strip()))
+        search_box.add_widget(self.search_input)
+        search_box.add_widget(search_btn)
+        self.main_container.add_widget(search_box)
+
+        self.history_list_box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=6)
+        self.history_list_box.bind(minimum_height=self.history_list_box.setter('height'))
+        
+        scroll_hist = ScrollView(size_hint=(1, None), height=320)
+        scroll_hist.add_widget(self.history_list_box)
+        self.main_container.add_widget(scroll_hist)
+
+        self.load_filtered_history("")
+
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
+
+    def load_filtered_history(self, query):
+        self.history_list_box.clear_widgets()
+        conn = sqlite3.connect(get_db_path())
+        cursor = conn.cursor()
+
+        if query:
+            cursor.execute("SELECT id, amount, category, date, description FROM expenses WHERE category LIKE ? OR description LIKE ? ORDER BY id DESC", 
+                           (f"%{query}%", f"%{query}%"))
+        else:
+            cursor.execute("SELECT id, amount, category, date, description FROM expenses ORDER BY id DESC")
+        
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            self.history_list_box.add_widget(Label(text="No matching transactions found.", color=(0.4, 0.4, 0.4, 1), size_hint_y=None, height=35))
+        else:
+            for row in rows:
+                eid, amt, cat, dt, desc = row
+                row_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=42, spacing=4)
+                row_layout.add_widget(Label(text=f"[b]{dt}[/b] | {cat} | ₹{amt:,.2f}", markup=True, color=(0.2, 0.2, 0.2, 1), font_size=12))
+                
+                edit_btn = Button(text="Edit", size_hint_x=None, width=50, background_normal='', background_color=(0.2, 0.5, 0.8, 1), bold=True)
+                edit_btn.bind(on_press=lambda x, r=row: self.show_edit_screen(r))
+                row_layout.add_widget(edit_btn)
+
+                del_btn = Button(text="Del", size_hint_x=None, width=50, background_normal='', background_color=(0.8, 0.2, 0.2, 1), bold=True)
+                del_btn.bind(on_press=lambda x, i=eid: self.confirm_delete(i))
+                row_layout.add_widget(del_btn)
+
+                self.history_list_box.add_widget(row_layout)
+
+    def show_edit_screen(self, row):
+        eid, amt, cat, dt, desc = row
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]Edit Transaction[/b]", markup=True, font_size=17, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
+
+        self.edit_amt = TextInput(text=str(amt), hint_text="Amount", multiline=False, input_filter='float', size_hint_y=None, height=45)
+        self.edit_cat = Spinner(text=cat, values=('Food', 'Travel', 'Shopping', 'Bills', 'Entertainment', 'Health', 'Education', 'Other'), size_hint_y=None, height=45)
+        self.edit_date = TextInput(text=dt, hint_text="Date (YYYY-MM-DD)", multiline=False, size_hint_y=None, height=45)
+        self.edit_desc = TextInput(text=desc, hint_text="Note", multiline=False, size_hint_y=None, height=45)
+
+        self.main_container.add_widget(Label(text="Amount:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.edit_amt)
+        self.main_container.add_widget(Label(text="Category:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.edit_cat)
+        self.main_container.add_widget(Label(text="Date:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.edit_date)
+        self.main_container.add_widget(Label(text="Note:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=22))
+        self.main_container.add_widget(self.edit_desc)
+
+        update_btn = Button(text="Update Transaction", size_hint_y=None, height=48, background_normal='', background_color=(0.15, 0.5, 0.8, 1), bold=True)
+        update_btn.bind(on_press=lambda x: self.save_edited_expense(eid))
+        self.main_container.add_widget(update_btn)
+
+        back_btn = Button(text="Cancel", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.show_history_screen())
+        self.main_container.add_widget(back_btn)
+
+    def save_edited_expense(self, eid):
+        try:
+            amt = float(self.edit_amt.text.strip())
+            cat = self.edit_cat.text
+            dt = self.edit_date.text.strip()
+            desc = self.edit_desc.text.strip()
+            if amt <= 0: raise ValueError()
+
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+            cursor.execute("UPDATE expenses SET amount = ?, category = ?, date = ?, description = ? WHERE id = ?", (amt, cat, dt, desc, eid))
+            conn.commit()
+            conn.close()
+
+            self.show_popup("Success", "Transaction updated successfully!")
+            self.show_history_screen()
+        except ValueError:
+            self.show_popup("Invalid Input", "Please enter valid details.")
+
+    # --- DELETE CONFIRMATION POPUP (Clean UI Theme) ---
+   # --- MODERN DELETE CONFIRMATION POPUP WITH TRANSACTION DETAILS ---
+    def confirm_delete(self, expense_id):
+        # Database se specific transaction ki details fetch karein
+        conn = sqlite3.connect(get_db_path())
+        cursor = conn.cursor()
+        cursor.execute("SELECT amount, category, date, description FROM expenses WHERE id = ?", (expense_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return
+        amt, cat, dt, desc = row
+
+        # Date formatting (e.g., 2026-09-20 -> 20 September 2026)
+        try:
+            parsed_date = datetime.strptime(dt, "%Y-%m-%d")
+            formatted_date = parsed_date.strftime("%d %B %Y")
+        except Exception:
+            formatted_date = dt
+
+        # Modern white container with smooth rounded corners
+        content = RoundedBox(bg_color=(1, 1, 1, 1), radius=20, orientation='vertical', padding=18, spacing=12)
+        
+        # Header / Title
+        content.add_widget(Label(
+            text="[b]Delete Transaction?[/b]", 
+            markup=True, 
+            color=(0.12, 0.15, 0.18, 1), 
+            font_size=16,
+            size_hint_y=None, height=26,
+            halign='center'
+        ))
+        
+        # Subtitle
+        content.add_widget(Label(
+            text="Are you sure you want to delete this transaction?", 
+            markup=True, 
+            color=(0.45, 0.50, 0.55, 1), 
+            font_size=12,
+            size_hint_y=None, height=20,
+            halign='center'
+        ))
+
+        # Transaction Details Highlight Box
+        details_box = RoundedBox(bg_color=(0.95, 0.96, 0.98, 1), radius=10, orientation='vertical', size_hint_y=None, height=52, padding=8, spacing=2)
+        details_box.add_widget(Label(
+            text=f"[b]{cat}[/b] • [color=#EF4444]₹{amt:,.2f}[/color]", 
+            markup=True, 
+            color=(0.2, 0.2, 0.2, 1), 
+            font_size=13,
+            halign='center'
+        ))
+        desc_text = f" • {desc}" if desc else ""
+        details_box.add_widget(Label(
+            text=f"{formatted_date}{desc_text}", 
+            markup=True, 
+            color=(0.55, 0.60, 0.65, 1), 
+            font_size=11,
+            halign='center'
+        ))
+        content.add_widget(details_box)
+        
+        # Action Buttons Layout (Cancel first, then Delete)
+        btn_box = BoxLayout(spacing=12, size_hint_y=None, height=44)
+        
+        # Cancel Button (#64748B soft slate)
+        no_btn = Button(
+            text="Cancel", 
+            background_normal='', 
+            background_color=(0.39, 0.45, 0.55, 1), 
+            color=(1, 1, 1, 1),
             bold=True,
-            font_style="Headline",
-            role="small",
-            size_hint_y=None,
-            height="28dp",
-            theme_text_color="Custom",
-            text_color=(0.4, 0.1, 0.5, 1)
+            font_size=13
         )
         
-        progress = ProgressBar(max=100, value=min(percent_used, 100), size_hint_y=None, height="6dp")
-        
-        status_text = f"Used: {percent_used:.1f}%"
-        if percent_used >= 100:
-            status_text += " | Budget Exceeded!"
-        elif percent_used >= 80:
-            status_text += " | Near Limit"
-            
-        status_label = MDLabel(
-            text=status_text,
-            font_style="Body",
-            role="small",
-            theme_text_color="Custom",
-            text_color=(0.8, 0.2, 0.2, 1) if percent_used >= 80 else (0.3, 0.3, 0.3, 1),
-            size_hint_y=None,
-            height="14dp"
-        )
-
-        spent_card.add_widget(spent_title)
-        spent_card.add_widget(spent_amount)
-        spent_card.add_widget(progress)
-        spent_card.add_widget(status_label)
-
-        nav_layout = MDBoxLayout(orientation="horizontal", spacing="6dp", size_hint=(1, None), height="40dp")
-        
-        analytics_btn = MDButton(MDButtonText(text="Analytics"), style="filled", size_hint_x=0.33)
-        analytics_btn.bind(on_release=lambda x: self.show_analytics())
-        
-        history_btn = MDButton(MDButtonText(text="History"), style="filled", size_hint_x=0.33)
-        history_btn.bind(on_release=lambda x: self.show_history())
-        
-        budget_btn = MDButton(MDButtonText(text="Budget"), style="filled", size_hint_x=0.33)
-        budget_btn.bind(on_release=lambda x: self.show_update_budget())
-
-        nav_layout.add_widget(analytics_btn)
-        nav_layout.add_widget(history_btn)
-        nav_layout.add_widget(budget_btn)
-
-        recent_title = MDLabel(
-            text="Recent Transactions",
-            font_style="Title",
-            role="small",
-            size_hint_y=None,
-            height="24dp",
-            theme_text_color="Custom",
-            text_color=(0.1, 0.1, 0.1, 1)
+        # Yes, Delete Button (#EF4444 red)
+        yes_btn = Button(
+            text="Yes, Delete", 
+            background_normal='', 
+            background_color=(0.937, 0.266, 0.266, 1), 
+            color=(1, 1, 1, 1),
+            bold=True,
+            font_size=13
         )
         
-        transactions_layout = MDBoxLayout(orientation="vertical", spacing="6dp", size_hint_y=None)
-        transactions_layout.bind(minimum_height=transactions_layout.setter('height'))
+        popup = Popup(
+            title="", 
+            separator_height=0,  # Removes default title bar for a clean card look
+            content=content, 
+            size_hint=(0.88, 0.42),
+            auto_dismiss=False
+        )
+        
+        def execute_delete(instance):
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+            conn.commit()
+            conn.close()
+            popup.dismiss()
+            self.load_filtered_history("")
 
-        self.cursor.execute("SELECT category, amount, date, description FROM expenses ORDER BY id DESC LIMIT 3")
-        recent_items = self.cursor.fetchall()
+        yes_btn.bind(on_press=execute_delete)
+        no_btn.bind(on_press=popup.dismiss)
+        
+        btn_box.add_widget(no_btn)
+        btn_box.add_widget(yes_btn)
+        content.add_widget(btn_box)
+        popup.open()
 
-        if not recent_items:
-            empty_lbl = MDLabel(
-                text="No recent transactions.",
-                halign="center",
-                theme_text_color="Custom",
-                text_color=(0.4, 0.4, 0.4, 1),
-                size_hint_y=None,
-                height="32dp"
-            )
-            transactions_layout.add_widget(empty_lbl)
+    # --- ANALYTICS SCREEN WITH PAST MONTH FILTER ---
+    def show_analytics_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]Past & Current Month Analytics[/b]", markup=True, font_size=16, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
+
+        now = datetime.now()
+        month_options = []
+        for i in range(6):
+            d = now - timedelta(days=i*30)
+            month_options.append(d.strftime("%Y-%m"))
+        
+        selector_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=45, spacing=10)
+        selector_box.add_widget(Label(text="Select Month:", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_x=None, width=110))
+        
+        self.month_spinner = Spinner(text=now.strftime("%Y-%m"), values=tuple(month_options))
+        selector_box.add_widget(self.month_spinner)
+        self.main_container.add_widget(selector_box)
+
+        filter_btn = Button(text="Load Analytics for Selected Month", size_hint_y=None, height=42, background_normal='', background_color=(0.2, 0.45, 0.65, 1), bold=True)
+        filter_btn.bind(on_press=lambda x: self.load_analytics_data(self.month_spinner.text))
+        self.main_container.add_widget(filter_btn)
+
+        self.analytics_results_box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=8)
+        self.analytics_results_box.bind(minimum_height=self.analytics_results_box.setter('height'))
+
+        scroll_ana = ScrollView(size_hint=(1, None), height=270)
+        scroll_ana.add_widget(self.analytics_results_box)
+        self.main_container.add_widget(scroll_ana)
+
+        self.load_analytics_data(now.strftime("%Y-%m"))
+
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
+
+    def load_analytics_data(self, selected_month):
+        self.analytics_results_box.clear_widgets()
+
+        conn = sqlite3.connect(get_db_path())
+        cursor = conn.cursor()
+        cursor.execute("SELECT category, SUM(amount) as total FROM expenses WHERE date LIKE ? GROUP BY category ORDER BY total DESC", (f"{selected_month}%",))
+        rows = cursor.fetchall()
+
+        cursor.execute("SELECT SUM(amount) FROM expenses WHERE date LIKE ?", (f"{selected_month}%",))
+        tot_exp = cursor.fetchone()[0] or 0.0
+
+        cursor.execute("SELECT SUM(amount) FROM income WHERE date LIKE ?", (f"{selected_month}%",))
+        tot_inc = cursor.fetchone()[0] or 0.0
+        conn.close()
+
+        summary_card = RoundedBox(bg_color=(1, 1, 1, 1), radius=8, size_hint_y=None, height=50, padding=8)
+        summary_card.add_widget(Label(text=f"[b]Month: {selected_month}[/b]\nIncome: ₹{tot_inc:,.2f} | Expense: ₹{tot_exp:,.2f}", markup=True, color=(0.15, 0.25, 0.22, 1), font_size=12))
+        self.analytics_results_box.add_widget(summary_card)
+
+        if not rows:
+            self.analytics_results_box.add_widget(Label(text=f"No expenses found for {selected_month}.", color=(0.4, 0.4, 0.4, 1), size_hint_y=None, height=40))
         else:
-            for cat, amt, dt, desc in recent_items:
-                item_card = MDCard(
-                    orientation="vertical",
-                    padding="10dp",
-                    style="elevated",
-                    size_hint=(1, None),
-                    height="54dp",
-                    radius=[10, 10, 10, 10],
-                    md_bg_color=(1, 1, 1, 1)
-                )
-                lbl1 = MDLabel(text=f"{cat} - ₹{amt:,.2f}", bold=True, font_style="Body", role="medium", theme_text_color="Custom", text_color=(0.1, 0.1, 0.1, 1))
-                lbl2 = MDLabel(text=f"{dt} | {desc if desc else 'N/A'}", font_style="Body", role="small", theme_text_color="Custom", text_color=(0.3, 0.3, 0.3, 1))
-                item_card.add_widget(lbl1)
-                item_card.add_widget(lbl2)
-                transactions_layout.add_widget(item_card)
+            self.analytics_results_box.add_widget(Label(text=f"[b]Category Breakdown ({selected_month}):[/b]", markup=True, color=(0.15, 0.25, 0.22, 1), font_size=13, size_hint_y=None, height=24))
+            for cat, total in rows:
+                card = RoundedBox(bg_color=(1, 1, 1, 1), radius=8, size_hint_y=None, height=40, padding=10)
+                card.add_widget(Label(text=f"[b]{cat}[/b]: [color=#d93838]₹{total:,.2f}[/color]", markup=True, color=(0.2, 0.2, 0.2, 1), font_size=13))
+                self.analytics_results_box.add_widget(card)
 
-        add_btn_layout = MDBoxLayout(orientation="horizontal", size_hint=(1, None), height="50dp", padding=[0, "4dp", 0, 0])
-        add_btn = MDButton(MDButtonText(text="+ Add Expense", font_style="Title", role="medium"), style="filled", pos_hint={"center_x": 0.5}, size_hint_x=1)
-        add_btn.bind(on_release=lambda x: self.show_add_expense())
-        add_btn_layout.add_widget(add_btn)
+    # --- SET BUDGET SCREEN ---
+    def show_budget_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]Manage Monthly Budget[/b]", markup=True, font_size=17, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
 
-        container.add_widget(spent_card)
-        container.add_widget(nav_layout)
-        container.add_widget(recent_title)
-        container.add_widget(transactions_layout)
-        container.add_widget(add_btn_layout)
+        conn = sqlite3.connect(get_db_path())
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key='monthly_budget'")
+        res = cursor.fetchone()
+        current_budget = res[0] if res else 25000.0
+        conn.close()
 
-        main_layout.add_widget(top_bar)
-        main_layout.add_widget(scroll)
-
-        self.screen.add_widget(main_layout)
-
-    # ---------------- HISTORY SCREEN ----------------
-    def show_history(self):
-        self.current_screen_name = "history"
-        self.screen.clear_widgets()
-
-        main_layout = MDBoxLayout(orientation="vertical", md_bg_color=(0.97, 0.97, 0.98, 1))
-        top_bar = self.create_top_bar("Transaction History", show_back=True)
-        scroll, container = self.create_mobile_card()
-
-        self.cursor.execute("SELECT id, category, amount, date, description FROM expenses ORDER BY id DESC")
-        records = self.cursor.fetchall()
-
-        if not records:
-            empty_lbl = MDLabel(
-                text="No transactions found.", 
-                halign="center", 
-                size_hint_y=None, 
-                height="50dp", 
-                theme_text_color="Custom", 
-                text_color=(0.4, 0.4, 0.4, 1)
-            )
-            container.add_widget(empty_lbl)
-        else:
-            for eid, cat, amt, dt, desc in records:
-                card = MDCard(
-                    orientation="vertical",
-                    padding=["12dp", "10dp", "12dp", "10dp"],
-                    spacing="6dp",
-                    style="elevated",
-                    size_hint=(1, None),
-                    height="110dp",
-                    radius=[12, 12, 12, 12],
-                    md_bg_color=(1, 1, 1, 1)
-                )
-                
-                lbl1 = MDLabel(
-                    text=f"{cat} - ₹{amt:,.2f}", 
-                    bold=True, 
-                    size_hint_y=None, 
-                    height="22dp", 
-                    theme_text_color="Custom", 
-                    text_color=(0.1, 0.1, 0.1, 1)
-                )
-                
-                lbl2 = MDLabel(
-                    text=f"Date: {dt} | Note: {desc if desc else 'N/A'}", 
-                    font_style="Body", 
-                    role="small", 
-                    theme_text_color="Custom", 
-                    text_color=(0.35, 0.35, 0.35, 1), 
-                    size_hint_y=None, 
-                    height="18dp"
-                )
-                
-                btn_box = MDBoxLayout(
-                    orientation="horizontal", 
-                    spacing="10dp", 
-                    size_hint=(1, None), 
-                    height="32dp"
-                )
-                
-                edit_btn = MDButton(MDButtonText(text="Edit"), style="outlined", size_hint_x=0.5)
-                edit_btn.bind(on_release=lambda x, id_val=eid: self.edit_expense(id_val))
-
-                delete_btn = MDButton(MDButtonText(text="Delete"), style="outlined", size_hint_x=0.5)
-                delete_btn.bind(on_release=lambda x, id_val=eid: self.confirm_delete_expense(id_val))
-
-                btn_box.add_widget(edit_btn)
-                btn_box.add_widget(delete_btn)
-
-                card.add_widget(lbl1)
-                card.add_widget(lbl2)
-                card.add_widget(btn_box)
-                container.add_widget(card)
-
-        main_layout.add_widget(top_bar)
-        main_layout.add_widget(scroll)
-
-        self.screen.add_widget(main_layout)
-
-    # ---------------- ANALYTICS ----------------
-    def show_analytics(self):
-        self.current_screen_name = "analytics"
-        self.screen.clear_widgets()
-
-        main_layout = MDBoxLayout(orientation="vertical", md_bg_color=(0.97, 0.97, 0.98, 1))
-        top_bar = self.create_top_bar("Spending Analytics", show_back=True)
-        scroll, container = self.create_mobile_card()
-
-        self.cursor.execute("SELECT category, SUM(amount) FROM expenses GROUP BY category")
-        data = self.cursor.fetchall()
-
-        if data:
-            categories = [row[0] for row in data]
-            amounts = [row[1] for row in data]
-
-            fig, ax = plt.subplots(figsize=(4, 4))
-            fig.patch.set_facecolor('#F8F9FA')
-            ax.set_facecolor('#F8F9FA')
-            
-            wedges, texts, autotexts = ax.pie(amounts, labels=categories, autopct='%1.1f%%', startangle=140)
-            for text in texts + autotexts:
-                text.set_color('#1C1B1F')
-
-            plt.tight_layout()
-            
-            chart_path = os.path.join(self.user_data_dir, "temp_chart.png")
-            plt.savefig(chart_path, transparent=True)
-            plt.close()
-
-            chart_img = Image(source=chart_path, size_hint=(1, None), height="280dp")
-            container.add_widget(chart_img)
-        else:
-            no_data = MDLabel(text="No data available for analytics.", halign="center", size_hint_y=None, height="80dp", theme_text_color="Custom", text_color=(0.4, 0.4, 0.4, 1))
-            container.add_widget(no_data)
-
-        main_layout.add_widget(top_bar)
-        main_layout.add_widget(scroll)
-
-        self.screen.add_widget(main_layout)
-
-    # ---------------- UPDATE BUDGET ----------------
-    def show_update_budget(self):
-        self.current_screen_name = "budget"
-        self.screen.clear_widgets()
-
-        main_layout = MDBoxLayout(orientation="vertical", md_bg_color=(0.97, 0.97, 0.98, 1))
-        top_bar = self.create_top_bar("Update Budget", show_back=True)
-        scroll, container = self.create_mobile_card()
-
-        self.budget_input = MDTextField(
-            MDTextFieldHintText(text="New Budget Limit (₹)"),
-            mode="outlined",
-            size_hint=(1, None),
-            height="56dp"
-        )
-
-        btn_box = MDBoxLayout(orientation="horizontal", spacing="12dp", size_hint=(1, None), height="48dp")
+        self.budget_input = TextInput(text=str(current_budget), hint_text="Enter new monthly budget", multiline=False, input_filter='float', size_hint_y=None, height=45)
         
-        save_btn = MDButton(MDButtonText(text="Save Budget"), style="filled", size_hint_x=0.5)
-        save_btn.bind(on_release=lambda x: self.save_new_budget())
+        self.main_container.add_widget(Label(text="Set Monthly Budget Limit (₹):", color=(0.15, 0.25, 0.22, 1), bold=True, size_hint_y=None, height=25))
+        self.main_container.add_widget(self.budget_input)
 
-        back_btn = MDButton(MDButtonText(text="Cancel"), style="outlined", size_hint_x=0.5)
-        back_btn.bind(on_release=lambda x: self.show_home())
+        save_btn = Button(text="Save Budget", size_hint_y=None, height=48, background_normal='', background_color=(0.75, 0.42, 0.1, 1), bold=True)
+        save_btn.bind(on_press=self.save_budget_db)
+        self.main_container.add_widget(save_btn)
 
-        btn_box.add_widget(save_btn)
-        btn_box.add_widget(back_btn)
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
 
-        container.add_widget(self.budget_input)
-        container.add_widget(btn_box)
-
-        main_layout.add_widget(top_bar)
-        main_layout.add_widget(scroll)
-
-        self.screen.add_widget(main_layout)
-
-    def save_new_budget(self):
-        val = self.budget_input.text.strip()
+    def save_budget_db(self, instance):
         try:
-            budget_val = float(val)
-            if budget_val < 0:
-                raise ValueError
-            self.set_budget(budget_val)
-            self.show_home()
+            new_budget = float(self.budget_input.text.strip())
+            if new_budget < 0: raise ValueError()
+
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+            cursor.execute("UPDATE settings SET value = ? WHERE key = 'monthly_budget'", (new_budget,))
+            conn.commit()
+            conn.close()
+
+            self.show_popup("Success", "Monthly budget updated successfully!")
+            self.refresh_dashboard()
         except ValueError:
-            self.show_alert_dialog("Invalid Budget", "Please enter a valid positive numeric budget limit.")
+            self.show_popup("Invalid Input", "Please enter a valid numeric budget amount.")
 
-    # ---------------- ADD EXPENSE ----------------
-    def show_add_expense(self):
-        self.current_screen_name = "add_expense"
-        self.screen.clear_widgets()
+    # --- SETTINGS SCREEN (Backup / Export Data) ---
+    def show_settings_screen(self):
+        self.clear_view()
+        self.main_container.add_widget(Label(text="[b]Settings & Data Export[/b]", markup=True, font_size=17, color=(0.12, 0.20, 0.18, 1), size_hint_y=None, height=35))
 
-        main_layout = MDBoxLayout(orientation="vertical", md_bg_color=(0.97, 0.97, 0.98, 1))
-        top_bar = self.create_top_bar("Add New Expense", show_back=True)
-        scroll, container = self.create_mobile_card()
+        self.main_container.add_widget(Label(text="Export your expense records to a CSV file for backup.", color=(0.3, 0.3, 0.3, 1), font_size=13, size_hint_y=None, height=30))
 
-        self.amt_in = MDTextField(
-            MDTextFieldHintText(text="Amount (₹)"),
-            mode="outlined",
-            size_hint=(1, None),
-            height="56dp"
-        )
+        export_btn = Button(text="Export Expenses to CSV", size_hint_y=None, height=48, background_normal='', background_color=(0.2, 0.5, 0.4, 1), bold=True)
+        export_btn.bind(on_press=self.export_csv)
+        self.main_container.add_widget(export_btn)
 
-        self.cat_in = MDTextField(
-            MDTextFieldHintText(text="Select Category"),
-            mode="outlined",
-            readonly=True,
-            size_hint=(1, None),
-            height="56dp"
-        )
+        back_btn = Button(text="Back to Dashboard", size_hint_y=None, height=45, background_normal='', background_color=(0.3, 0.38, 0.42, 1), bold=True)
+        back_btn.bind(on_press=lambda x: self.refresh_dashboard())
+        self.main_container.add_widget(back_btn)
 
-        categories = ["Food", "Travel", "Shopping", "Bills", "Education", "Entertainment", "Health", "Other"]
-        menu_items = [
-            {
-                "text": cat,
-                "on_release": lambda x=cat: self.set_category_add(x),
-            } for cat in categories
-        ]
-        
-        self.cat_menu = MDDropdownMenu(
-            caller=self.cat_in,
-            items=menu_items,
-            position="bottom"
-        )
-        self.cat_in.bind(focus=lambda instance, focused: self.cat_menu.open() if focused else None)
-
-        self.desc_in = MDTextField(
-            MDTextFieldHintText(text="Note / Description (Optional)"),
-            mode="outlined",
-            size_hint=(1, None),
-            height="56dp"
-        )
-
-        save_btn = MDButton(
-            MDButtonText(text="Save Expense", font_style="Title", role="medium"), 
-            style="filled", 
-            pos_hint={"center_x": 0.5}, 
-            size_hint=(1, None),
-            height="48dp"
-        )
-        save_btn.bind(on_release=lambda x: self.save_expense())
-
-        container.add_widget(self.amt_in)
-        container.add_widget(self.cat_in)
-        container.add_widget(self.desc_in)
-        container.add_widget(MDBoxLayout(size_hint_y=None, height="10dp"))
-        container.add_widget(save_btn)
-
-        main_layout.add_widget(top_bar)
-        main_layout.add_widget(scroll)
-
-        self.screen.add_widget(main_layout)
-
-    def set_category_add(self, text_item):
-        self.cat_in.text = text_item
-        self.cat_menu.dismiss()
-
-    def save_expense(self):
-        amt_str = self.amt_in.text.strip()
-        cat = self.cat_in.text.strip()
-        desc = self.desc_in.text.strip()
-
-        if not amt_str or not cat or cat == "Select Category":
-            self.show_alert_dialog("Missing Information", "Please enter a valid amount and select a category.")
-            return
-
+    def export_csv(self, instance):
         try:
-            amt = float(amt_str)
-            if amt <= 0:
-                raise ValueError
-        except ValueError:
-            self.show_alert_dialog("Invalid Amount", "Please enter a valid numeric amount greater than zero.")
-            return
+            file_path = os.path.join(get_db_path().replace("expenses.db", ""), "expenses_backup.csv")
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, amount, category, date, description FROM expenses")
+            rows = cursor.fetchall()
+            conn.close()
 
-        today = date.today().strftime("%Y-%m-%d")
-        self.cursor.execute("INSERT INTO expenses (amount, category, date, description) VALUES (?, ?, ?, ?)",
-                            (amt, cat, today, desc))
-        self.connection.commit()
-        self.show_home()
+            with open(file_path, mode='w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["ID", "Amount", "Category", "Date", "Description"])
+                writer.writerows(rows)
 
-    # ---------------- EDIT EXPENSE ----------------
-    def edit_expense(self, expense_id):
-        self.current_screen_name = "edit_expense"
-        self.cursor.execute("SELECT amount, category, description FROM expenses WHERE id = ?", (expense_id,))
-        record = self.cursor.fetchone()
-        if not record:
-            return
+            self.show_popup("Export Successful", f"Backup saved successfully at:\n{file_path}")
+        except Exception as e:
+            self.show_popup("Export Failed", f"Error exporting data: {str(e)}")
 
-        self.screen.clear_widgets()
 
-        main_layout = MDBoxLayout(orientation="vertical", md_bg_color=(0.97, 0.97, 0.98, 1))
-        top_bar = self.create_top_bar("Edit Expense", show_back=True)
-        scroll, container = self.create_mobile_card()
+# --- APP RUNNER ---
+class ExpenseTrackerApp(App):
+    def build(self):
+        init_db()
+        return ExpenseTrackerRoot()
 
-        self.edit_amt_in = MDTextField(
-            MDTextFieldHintText(text="Amount (₹)"),
-            mode="outlined",
-            text=str(record[0]),
-            size_hint=(1, None),
-            height="56dp"
-        )
-
-        self.edit_cat_in = MDTextField(
-            MDTextFieldHintText(text="Category"),
-            mode="outlined",
-            text=record[1],
-            readonly=True,
-            size_hint=(1, None),
-            height="56dp"
-        )
-
-        categories = ["Food", "Travel", "Shopping", "Bills", "Education", "Entertainment", "Health", "Other"]
-        menu_items = [
-            {
-                "text": cat,
-                "on_release": lambda x=cat: self.set_category_edit(x),
-            } for cat in categories
-        ]
-        self.edit_cat_menu = MDDropdownMenu(
-            caller=self.edit_cat_in,
-            items=menu_items,
-            position="bottom"
-        )
-        self.edit_cat_in.bind(focus=lambda instance, focused: self.edit_cat_menu.open() if focused else None)
-
-        self.edit_desc_in = MDTextField(
-            MDTextFieldHintText(text="Note / Description"),
-            mode="outlined",
-            text=record[2] if record[2] else "",
-            size_hint=(1, None),
-            height="56dp"
-        )
-
-        update_btn = MDButton(
-            MDButtonText(text="Update Expense", font_style="Title", role="medium"), 
-            style="filled", 
-            pos_hint={"center_x": 0.5}, 
-            size_hint=(1, None),
-            height="48dp"
-        )
-        update_btn.bind(on_release=lambda x: self.update_expense(expense_id, self.edit_amt_in.text, self.edit_cat_in.text, self.edit_desc_in.text))
-
-        container.add_widget(self.edit_amt_in)
-        container.add_widget(self.edit_cat_in)
-        container.add_widget(self.edit_desc_in)
-        container.add_widget(MDBoxLayout(size_hint_y=None, height="10dp"))
-        container.add_widget(update_btn)
-
-        main_layout.add_widget(top_bar)
-        main_layout.add_widget(scroll)
-
-        self.screen.add_widget(main_layout)
-
-    def set_category_edit(self, text_item):
-        self.edit_cat_in.text = text_item
-        self.edit_cat_menu.dismiss()
-
-    def update_expense(self, expense_id, amount_str, category, description):
-        try:
-            amount = float(amount_str)
-            if amount <= 0:
-                raise ValueError
-        except ValueError:
-            self.show_alert_dialog("Invalid Amount", "Please enter a valid numeric amount greater than zero.")
-            return
-
-        self.cursor.execute("""
-            UPDATE expenses
-            SET amount = ?, category = ?, description = ?
-            WHERE id = ?
-        """, (amount, category, description, expense_id))
-        self.connection.commit()
-        self.show_history()
-
-    # ---------------- DELETE CONFIRMATION ----------------
-    def confirm_delete_expense(self, expense_id):
-        dialog = MDDialog(
-            MDDialogHeadlineText(text="Delete Expense"),
-            MDDialogSupportingText(text="Are you sure you want to permanently delete this transaction?"),
-            MDDialogButtonContainer(
-                MDButton(
-                    MDButtonText(text="Cancel"),
-                    style="text",
-                    on_release=lambda x: dialog.dismiss()
-                ),
-                MDButton(
-                    MDButtonText(text="Delete"),
-                    style="filled",
-                    on_release=lambda x: (dialog.dismiss(), self.delete_expense(expense_id))
-                ),
-                spacing="8dp",
-            ),
-        )
-        dialog.open()
-
-    def delete_expense(self, expense_id):
-        self.cursor.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
-        self.connection.commit()
-        self.show_history()
-
-if __name__ == "__main__":
-    ExpenseTracker().run()
+if __name__ == '__main__':
+    ExpenseTrackerApp().run()
