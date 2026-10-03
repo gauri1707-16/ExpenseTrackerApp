@@ -112,11 +112,11 @@ class DatabaseManager:
     )
     self.conn.commit()
 
-  def update_expense(self, expense_id, amount, category, description):
+  def update_expense(self, expense_id, amount, category, date_str, description):
     self.cursor.execute(
-        "UPDATE expenses SET amount = ?, category = ?, description = ? WHERE"
-        " id = ?",
-        (amount, category, description, expense_id),
+        "UPDATE expenses SET amount = ?, category = ?, date = ?, description ="
+        " ? WHERE id = ?",
+        (amount, category, date_str, description, expense_id),
     )
     self.conn.commit()
 
@@ -194,7 +194,7 @@ current_user = {"id": None, "name": ""}
 def show_popup(title, text):
   content = BoxLayout(orientation="vertical", padding=15, spacing=15)
   with content.canvas.before:
-    Color(0.93, 0.96, 0.93, 1)
+    Color(0.82, 0.88, 0.83, 1)
     rect = Rectangle(pos=content.pos, size=content.size)
   content.bind(
       pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -220,7 +220,7 @@ def show_popup(title, text):
       size_hint=(0.7, 0.35),
       auto_dismiss=True,
       background="",
-      background_color=(0.93, 0.96, 0.93, 1),
+      background_color=(0.82, 0.88, 0.83, 1),
   )
   btn.bind(on_release=popup.dismiss)
   content.add_widget(btn)
@@ -232,7 +232,7 @@ class LoginScreen(MDScreen):
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
-    self.md_bg_color = (0.93, 0.96, 0.93, 1)
+    self.md_bg_color = (0.82, 0.88, 0.83, 1)
 
     self.add_widget(
         Label(
@@ -315,7 +315,7 @@ class SignupScreen(MDScreen):
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
-    self.md_bg_color = (0.93, 0.96, 0.93, 1)
+    self.md_bg_color = (0.82, 0.88, 0.83, 1)
 
     self.add_widget(
         Label(
@@ -362,7 +362,7 @@ class SignupScreen(MDScreen):
         background_color=(0.3, 0.3, 0.3, 1),
     )
     back_btn.bind(
-        on_release=lambda x: setattr(self.manager, "current", "login")
+        on_release=lambda x: setattr(self.manager, "current", "signup")
     )
 
     self.add_widget(self.username_input)
@@ -400,7 +400,7 @@ class DashboardScreen(MDScreen):
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
-    self.md_bg_color = (0.93, 0.96, 0.93, 1)
+    self.md_bg_color = (0.82, 0.88, 0.83, 1)
 
     self.header_label = Label(
         text="Expense & Budget Manager",
@@ -518,7 +518,7 @@ class DashboardScreen(MDScreen):
   def open_add_expense_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=12, spacing=12)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -541,6 +541,11 @@ class DashboardScreen(MDScreen):
         size_hint=(1, 1),
         background_color=(0.1, 0.5, 0.3, 1),
     )
+    date_input = TextInput(
+        text=datetime.date.today().strftime("%Y-%m-%d"),
+        hint_text="Date (YYYY-MM-DD)",
+        multiline=False,
+    )
     desc_input = TextInput(hint_text="Description / Note", multiline=False)
 
     submit_btn = Button(
@@ -551,31 +556,40 @@ class DashboardScreen(MDScreen):
     popup = Popup(
         title="Add New Expense",
         content=content,
-        size_hint=(0.8, 0.55),
+        size_hint=(0.8, 0.65),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
 
     def save(btn):
       try:
         amt = float(amt_input.text.strip())
         cat = cat_spinner.text
+        date_str = date_input.text.strip()
         desc = desc_input.text.strip()
+
         if cat == "Select Category" or not cat:
           show_popup("Error", "Please select a valid category.")
           return
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
+
+        datetime.datetime.strptime(date_str, "%Y-%m-%d")
+
         db.add_expense(current_user["id"], amt, cat, date_str, desc)
         popup.dismiss()
         self.load_dashboard_data()
-        show_popup("Success", "Expense added successfully!")
+        show_popup("Success", f"Expense added for date {date_str} successfully!")
       except ValueError:
-        show_popup("Error", "Please enter a valid amount.")
+        show_popup(
+            "Error",
+            "Please enter a valid amount and ensure date is in YYYY-MM-DD"
+            " format.",
+        )
 
     submit_btn.bind(on_release=save)
     content.add_widget(amt_input)
     content.add_widget(cat_spinner)
+    content.add_widget(date_input)
     content.add_widget(desc_input)
     content.add_widget(submit_btn)
     popup.open()
@@ -583,7 +597,7 @@ class DashboardScreen(MDScreen):
   def open_add_income_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=12, spacing=12)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -606,7 +620,7 @@ class DashboardScreen(MDScreen):
         size_hint=(0.8, 0.45),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
 
     def save(btn):
@@ -632,7 +646,7 @@ class DashboardScreen(MDScreen):
   def open_set_budget_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=15, spacing=12)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -665,7 +679,7 @@ class DashboardScreen(MDScreen):
         size_hint=(0.8, 0.45),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
 
     def update_budget(btn):
@@ -689,7 +703,7 @@ class DashboardScreen(MDScreen):
   def open_settings_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=15, spacing=15)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -734,7 +748,7 @@ class DashboardScreen(MDScreen):
         size_hint=(0.8, 0.5),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
     close_btn.bind(on_release=popup.dismiss)
 
@@ -746,7 +760,7 @@ class DashboardScreen(MDScreen):
   def open_history_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=15, spacing=10)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -781,7 +795,7 @@ class DashboardScreen(MDScreen):
               spacing=10,
           )
 
-          row_text = f"{r[3]} | {r[2]} | ₹{r[1]} | {r[4] or ''}"
+          row_text = f"Date: {r[3]} | Cat: {r[2]} | Amt: ₹{r[1]} | Note: {r[4] or ''}"
           lbl = Label(
               text=row_text,
               font_size="12sp",
@@ -804,23 +818,24 @@ class DashboardScreen(MDScreen):
           )
 
           def make_edit_action(
-              exp_id, cur_amt, cur_cat, cur_desc
+              exp_id, cur_amt, cur_cat, cur_date, cur_desc
           ):
             return lambda x: self.open_edit_expense_popup(
                 exp_id,
                 cur_amt,
                 cur_cat,
+                cur_date,
                 cur_desc,
                 popup_to_refresh,
                 refresh_history,
             )
 
           def make_del_action(exp_id):
-            return lambda x: self.delete_expense_action(
+            return lambda x: self.confirm_delete_expense(
                 exp_id, popup_to_refresh, refresh_history
             )
 
-          edit_btn.bind(on_release=make_edit_action(r[0], r[1], r[2], r[4]))
+          edit_btn.bind(on_release=make_edit_action(r[0], r[1], r[2], r[3], r[4]))
           del_btn.bind(on_release=make_del_action(r[0]))
 
           row_box.add_widget(lbl)
@@ -839,7 +854,7 @@ class DashboardScreen(MDScreen):
         size_hint=(0.9, 0.8),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
     close_btn.bind(on_release=popup.dismiss)
 
@@ -850,12 +865,69 @@ class DashboardScreen(MDScreen):
     content.add_widget(close_btn)
     popup.open()
 
+  def confirm_delete_expense(self, exp_id, parent_popup, refresh_callback):
+    """Are you sure you want to delete this transaction? confirmation popup"""
+    content = BoxLayout(orientation="vertical", padding=15, spacing=15)
+    with content.canvas.before:
+      Color(0.82, 0.88, 0.83, 1)
+      rect = Rectangle(pos=content.pos, size=content.size)
+    content.bind(
+        pos=lambda s, w: setattr(rect, "pos", s.pos),
+        size=lambda s, w: setattr(rect, "size", s.size),
+    )
+
+    lbl = Label(
+        text="Are you sure you want to delete this transaction?",
+        font_size="15sp",
+        color=(0.1, 0.3, 0.2, 1),
+        halign="center",
+        valign="middle",
+    )
+    lbl.bind(size=lambda s, w: setattr(s, "text_size", (int(w[0]), None)))
+    content.add_widget(lbl)
+
+    btn_layout = BoxLayout(
+        orientation="horizontal", size_hint=(1, 0.5), spacing=10
+    )
+    yes_btn = Button(
+        text="Yes, Delete",
+        background_color=(0.8, 0.2, 0.2, 1),
+    )
+    no_btn = Button(
+        text="Cancel",
+        background_color=(0.5, 0.5, 0.5, 1),
+    )
+
+    conf_popup = Popup(
+        title="Confirm Deletion",
+        content=content,
+        size_hint=(0.7, 0.35),
+        auto_dismiss=True,
+        background="",
+        background_color=(0.82, 0.88, 0.83, 1),
+    )
+
+    def do_delete(instance):
+      db.delete_expense(exp_id)
+      conf_popup.dismiss()
+      refresh_callback(parent_popup)
+      self.load_dashboard_data()
+      show_popup("Deleted", "Transaction removed successfully.")
+
+    yes_btn.bind(on_release=do_delete)
+    no_btn.bind(on_release=conf_popup.dismiss)
+
+    btn_layout.add_widget(yes_btn)
+    btn_layout.add_widget(no_btn)
+    content.add_widget(btn_layout)
+    conf_popup.open()
+
   def open_edit_expense_popup(
-      self, exp_id, amt, cat, desc, parent_popup, refresh_callback
+      self, exp_id, amt, cat, date_val, desc, parent_popup, refresh_callback
   ):
     content = BoxLayout(orientation="vertical", padding=12, spacing=12)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -880,6 +952,9 @@ class DashboardScreen(MDScreen):
         size_hint=(1, 1),
         background_color=(0.1, 0.5, 0.3, 1),
     )
+    date_input = TextInput(
+        text=str(date_val), hint_text="Date (YYYY-MM-DD)", multiline=False
+    )
     desc_input = TextInput(
         text=str(desc or ""), hint_text="Description / Note", multiline=False
     )
@@ -892,42 +967,44 @@ class DashboardScreen(MDScreen):
     popup = Popup(
         title="Edit Expense",
         content=content,
-        size_hint=(0.75, 0.5),
+        size_hint=(0.75, 0.55),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
 
     def save_update(btn):
       try:
         new_amt = float(amt_input.text.strip())
         new_cat = cat_spinner.text
+        new_date = date_input.text.strip()
         new_desc = desc_input.text.strip()
-        db.update_expense(exp_id, new_amt, new_cat, new_desc)
+
+        datetime.datetime.strptime(new_date, "%Y-%m-%d")
+
+        db.update_expense(exp_id, new_amt, new_cat, new_date, new_desc)
         popup.dismiss()
         refresh_callback(parent_popup)
         self.load_dashboard_data()
         show_popup("Success", "Expense updated successfully!")
       except ValueError:
-        show_popup("Error", "Please enter a valid amount.")
+        show_popup(
+            "Error",
+            "Please check values. Date must be in YYYY-MM-DD format.",
+        )
 
     update_btn.bind(on_release=save_update)
     content.add_widget(amt_input)
     content.add_widget(cat_spinner)
+    content.add_widget(date_input)
     content.add_widget(desc_input)
     content.add_widget(update_btn)
     popup.open()
 
-  def delete_expense_action(self, exp_id, parent_popup, refresh_callback):
-    db.delete_expense(exp_id)
-    refresh_callback(parent_popup)
-    self.load_dashboard_data()
-    show_popup("Deleted", "Transaction removed successfully.")
-
   def open_analytics_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=15, spacing=10)
     with content.canvas.before:
-      Color(0.93, 0.96, 0.93, 1)
+      Color(0.82, 0.88, 0.83, 1)
       rect = Rectangle(pos=content.pos, size=content.size)
     content.bind(
         pos=lambda s, w: setattr(rect, "pos", s.pos),
@@ -988,7 +1065,7 @@ class DashboardScreen(MDScreen):
         size_hint=(0.85, 0.75),
         auto_dismiss=True,
         background="",
-        background_color=(0.93, 0.96, 0.93, 1),
+        background_color=(0.82, 0.88, 0.83, 1),
     )
     close_btn.bind(on_release=popup.dismiss)
 
@@ -1019,7 +1096,7 @@ class DashboardScreen(MDScreen):
 
     if len(recent) > 0:
       self.trans_1.text = (
-          f"{recent[0][0]} | {recent[0][1]} | ₹{recent[0][2]} |"
+          f"Date: {recent[0][0]} | {recent[0][1]} | ₹{recent[0][2]} |"
           f" {recent[0][3] or ''}"
       )
     else:
@@ -1027,7 +1104,7 @@ class DashboardScreen(MDScreen):
 
     if len(recent) > 1:
       self.trans_2.text = (
-          f"{recent[1][0]} | {recent[1][1]} | ₹{recent[1][2]} |"
+          f"Date: {recent[1][0]} | {recent[1][1]} | ₹{recent[1][2]} |"
           f" {recent[1][3] or ''}"
       )
     else:
