@@ -15,6 +15,68 @@ from kivy.uix.textinput import TextInput
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 
+# --- Database Viewer Popup Class ---
+class DatabaseViewerPopup(Popup):
+    def __init__(self, db_name='expense_tracker.db', **kwargs):
+        super(DatabaseViewerPopup, self).__init__(**kwargs)
+        self.title = "Database Inspector"
+        self.size_hint = (0.9, 0.9)
+        self.db_name = db_name
+
+        layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
+
+        # Table Selector Dropdown
+        tables = self.get_tables()
+        self.spinner = Spinner(text=tables[0] if tables else 'No Tables', values=tables, size_hint_y=None, height=44)
+        self.spinner.bind(text=lambda spinner, text: self.load_data(text))
+        layout.add_widget(self.spinner)
+
+        # Scrollable View for Data
+        self.scroll = ScrollView()
+        self.label = Label(text="", size_hint_x=None, width=800, size_hint_y=None, halign='left', valign='top', markup=True)
+        self.label.bind(texture_size=self.label.setter('size'))
+        self.scroll.add_widget(self.label)
+        layout.add_widget(self.scroll)
+
+        # Close Button
+        close_btn = Button(text="Close", size_hint_y=None, height=44)
+        close_btn.bind(on_release=self.dismiss)
+        layout.add_widget(close_btn)
+
+        self.content = layout
+        if tables:
+            self.load_data(tables[0])
+
+    def get_tables(self):
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            return tables
+        except:
+            return []
+
+    def load_data(self, table_name):
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            cols = [col[1] for col in cursor.fetchall()]
+            cursor.execute(f"SELECT * FROM {table_name}")
+            rows = cursor.fetchall()
+            conn.close()
+
+            if not rows:
+                self.label.text = f"Table '{table_name}' is empty."
+                return
+
+            header = " | ".join([f"[b]{c}[/b]" for c in cols])
+            body = "\n".join([" | ".join(str(v) for v in r) for r in rows])
+            self.label.text = f"[b]{table_name.upper()}[/b]\n\n{header}\n" + "-"*40 + f"\n{body}"
+        except Exception as e:
+            self.label.text = f"Error: {e}"
 
 # --- DATABASE MANAGER ---
 class DatabaseManager:
@@ -409,7 +471,7 @@ class DashboardScreen(MDScreen):
         color=(0.1, 0.3, 0.2, 1),
         pos_hint={"center_x": 0.5, "center_y": 0.95},
     )
-
+    
     self.summary_label = Label(
         text=(
             "Dashboard Summary (Current Month)\n\nIncome: ₹0.00        Expense:"
@@ -454,7 +516,7 @@ class DashboardScreen(MDScreen):
         size_hint=(0.48, 0.05),
         pos_hint={"center_x": 0.74, "center_y": 0.56},
         background_color=(0.2, 0.4, 0.7, 1),
-    )
+    ) 
     analytics_btn.bind(on_release=self.open_analytics_popup)
 
     budget_btn = Button(
@@ -473,6 +535,7 @@ class DashboardScreen(MDScreen):
     )
     settings_btn.bind(on_release=self.open_settings_popup)
 
+     
     logout_btn = Button(
         text="Logout",
         size_hint=(0.96, 0.05),
@@ -501,7 +564,18 @@ class DashboardScreen(MDScreen):
         color=(0.2, 0.2, 0.2, 1),
         pos_hint={"center_x": 0.5, "center_y": 0.18},
     )
+    def open_database_viewer(self, instance):
+      viewer = DatabaseViewerPopup()
+      viewer.open()
 
+    view_db_btn = Button(
+        text="View Database (Debug)",
+        size_hint=(0.96, 0.05),
+        pos_hint={"center_x": 0.5, "center_y": 0.10},
+        background_color=(0.3, 0.3, 0.3, 1),
+    )
+    view_db_btn.bind(on_release=lambda x: DatabaseViewerPopup().open())
+    
     self.add_widget(self.header_label)
     self.add_widget(self.summary_label)
     self.add_widget(add_exp_btn)
@@ -514,6 +588,7 @@ class DashboardScreen(MDScreen):
     self.add_widget(self.trans_title)
     self.add_widget(self.trans_1)
     self.add_widget(self.trans_2)
+    self.add_widget(view_db_btn)
 
   def open_add_expense_popup(self, instance):
     content = BoxLayout(orientation="vertical", padding=12, spacing=12)
@@ -1114,6 +1189,8 @@ class DashboardScreen(MDScreen):
     current_user["id"] = None
     current_user["name"] = ""
     self.manager.current = "login"
+
+
 
 
 # --- MAIN APP ---
