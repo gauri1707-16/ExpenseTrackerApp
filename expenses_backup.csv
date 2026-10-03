@@ -16,3 +16,5 @@ ID,Amount,Category,Date,Description
 19,3000.0,Food,2026-09-03,Groceries
 20,2000.0,Shopping,2026-09-04,Shopping
 21,2000.0,Travel,2026-09-06,Train pass And Fares
+22,3000.0,Travel,2026-10-01,Office Travelling
+23,250.0,Travel,2026-10-01,Rapido
